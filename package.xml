@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>micro_ros_raspberrypicosdk</name>
-  <version>5.0.1</version>
-  <description>micro-ROS tools for Raspberry Pico SDK</description>
-  <maintainer email="pablogarrido@eprosima.com">Pablo Garrido</maintainer>
+  <name>mbot_firmware_ros</name>
+  <version>1.1.5</version>
+  <description>MBot Classic firmware for Raspberry Pi Pico using micro-ROS. Provides motor control, odometry, IMU integration, and LiDAR control for differential drive mobile robots running ROS2 Jazzy.</description>
+  <maintainer email="xssun@umich.edu">Shaw Sun</maintainer>
   <license>Apache License 2.0</license>
 </package>
