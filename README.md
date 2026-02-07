@@ -56,12 +56,12 @@ sudo mbot-upload-firmware flash mbot_classic_ros.uf2
 ### Publishers
 | Topic        | Pub Rate | QoS         |
 | -------------- | ---------- | :------------ |
-| /battery_adc | 25 HZ    | Best Effort |
+| /battery_adc | 4 HZ    | Best Effort |
 | /encoders    | 50 HZ    | Best Effort |
 | /imu         | 100 HZ   | Best Effort |
 | /motor_vel   | 100 HZ   | Best Effort |
 | /odom        | 25 HZ    | Reliable    |
-| /tf          | 25 HZ    | Reliable |
+| /tf          | 50 HZ    | Reliable |
 
 ### MBot State
 - Using local state variables for robot state (`mbot_state_t`, `mbot_cmd_t`)

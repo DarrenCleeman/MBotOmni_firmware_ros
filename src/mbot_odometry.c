@@ -15,3 +15,7 @@ void mbot_calculate_odometry(float vx, float vy, float wz, float dt, float* x, f
     while (*theta > PI) *theta -= 2.0 * PI;
     while (*theta <= -PI) *theta += 2.0 * PI;
 }
+
+void mbot_calculate_gyrodometry(float vx, float vy, float wz, float dt, float gyro_z, float* x, float* y, float* theta) {
+    return;
+}

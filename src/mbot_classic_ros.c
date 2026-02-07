@@ -60,7 +60,6 @@ static rclc_parameter_server_t parameter_server;
 // Timer for periodic publishing
 static rcl_timer_t ros_publish_timer;
 static repeating_timer_t mbot_loop_timer;
-static uint8_t pub_tick = 0;  // rolls 0-3, to control publishing rate
 
 int mbot_init_micro_ros(void);
 int mbot_spin_micro_ros(void);
@@ -179,64 +178,36 @@ int mbot_spin_micro_ros(void) {
 
 // Publish all robot state to ROS topics
 static void mbot_publish_state(void) {
+    static uint8_t tick = 0;
+    tick++;
+
     rcl_ret_t ret;
-    if (!rmw_uros_epoch_synchronized()) {
-        printf("[FATAL] Last time synchronization failed\n");
-        while(1) { tight_loop_contents(); }
-    }
 
-    /* Increment the publish tick counter (0..PUB_DIV_ODOM-1) */
-    pub_tick = (pub_tick + 1) % PUB_DIV_ODOM;
+    // IMU - every callback
+    ret = rcl_publish(&imu_publisher, &imu_msg, NULL);
 
-    /* Take a snapshot of the state for thread-safety */
+    // Motor velocities - every callback
     mbot_state_t local_state;
     get_mbot_state_safe(&local_state);
-
-    /* ---------------- 100 Hz topics ---------------- */
-    // IMU (already populated during sensor read)
-    ret = rcl_publish(&imu_publisher, &imu_msg, NULL);
-    if (ret != RCL_RET_OK) {
-        printf("Error publishing IMU message: %d\r\n", ret);
-    }
-
-    // Publish motor velocities
     motor_vel_msg.velocity[MOT_L] = local_state.wheel_vel[MOT_L];
     motor_vel_msg.velocity[MOT_R] = local_state.wheel_vel[MOT_R];
     motor_vel_msg.velocity[MOT_UNUSED] = 0.0f;
     ret = rcl_publish(&motor_vel_publisher, &motor_vel_msg, NULL);
-    if (ret != RCL_RET_OK) {
-        printf("Error publishing motor velocity message: %d\r\n", ret);
-    }
 
-    /* ---------------- 50 Hz topics ---------------- */
-    if (pub_tick % PUB_DIV_ENCODERS == 0) {
-        // Encoder message already populated in mbot_read_encoders()
+    // Encoders & TF - every 2nd tick (50 Hz at 100 Hz timer)
+    if (tick % 2 == 0) {
         ret = rcl_publish(&encoders_publisher, &encoders_msg, NULL);
-        if (ret != RCL_RET_OK) {
-            printf("Error publishing encoders message: %d\r\n", ret);
-        }
-    }
-
-    /* ---------------- 25 Hz topics ---------------- */
-    if (pub_tick % PUB_DIV_BATTERY == 0) {
-        // Battery ADC message already populated in mbot_read_adc()
-        ret = rcl_publish(&battery_publisher, &battery_msg, NULL);
-        if (ret != RCL_RET_OK) {
-            printf("Error publishing battery message: %d\r\n", ret);
-        }
-    }
-
-    if (pub_tick == 0) {  // Every PUB_DIV_ODOM ticks
-        // Odometry & TF populated in control loop
-        ret = rcl_publish(&odom_publisher, &odom_msg, NULL);
-        if (ret != RCL_RET_OK) {
-            printf("Error publishing odometry message: %d\r\n", ret);
-        }
-
         ret = rcl_publish(&tf_publisher, &tf_msg, NULL);
-        if (ret != RCL_RET_OK) {
-            printf("Error publishing TF message: %d\r\n", ret);
-        }
+    }
+
+    // Encoders & Odometry & TF - every 4th tick (25 Hz at 100 Hz timer)
+    if (tick % 4 == 0) {
+        ret = rcl_publish(&odom_publisher, &odom_msg, NULL);
+    }
+
+    // Battery - every 25th tick (4 Hz at 100 Hz timer)
+    if (tick % 25 == 0) {
+        ret = rcl_publish(&battery_publisher, &battery_msg, NULL);
     }
 }
 
@@ -264,6 +235,16 @@ static bool mbot_loop(repeating_timer_t *rt) {
             &mbot_state.odom_y,
             &mbot_state.odom_theta
         );
+        // mbot_calculate_gyrodometry(
+        //     mbot_state.vx,
+        //     mbot_state.vy,
+        //     mbot_state.wz,
+        //     MAIN_LOOP_PERIOD,
+        //     mbot_state.imu_gyro[2],
+        //     &mbot_state.odom_x,
+        //     &mbot_state.odom_y,
+        //     &mbot_state.odom_theta
+        // );
         /* Populate odometry and TF ROS messages with the exact timestamp of this calculation */
         int64_t stamp_ns = rmw_uros_epoch_nanos();
 
@@ -416,6 +397,14 @@ static bool mbot_loop(repeating_timer_t *rt) {
 
 // Timer callback for periodic ROS publishing (runs at ROS_TIMER_HZ)
 void timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
+    // Periodic time re-sync to prevent clock drift
+    static uint64_t last_sync_time_us = 0;
+    uint64_t now_us = time_us_64();
+    if (now_us - last_sync_time_us >= TIME_SYNC_INTERVAL_SEC * 1000000) {
+        last_sync_time_us = now_us;
+        rmw_uros_sync_session(100);
+    }
+
     mbot_publish_state();
 }
 
