@@ -19,27 +19,6 @@
 mbot_bhy_data_t mbot_imu_data;
 mbot_bhy_config_t mbot_imu_config;
 
-void find_two_smallest(float* arr, int size, int* idx1, int* idx2) {
-    *idx1 = 0;
-    *idx2 = 1;
-
-    if (fabs(arr[*idx2]) < fabs(arr[*idx1])) {
-        // swap
-        int temp = *idx1;
-        *idx1 = *idx2;
-        *idx2 = temp;
-    }
-
-    for (int i = 2; i < size; i++) {
-        if (fabs(arr[i]) < fabs(arr[*idx1])) {
-            *idx2 = *idx1;
-            *idx1 = i;
-        } else if (fabs(arr[i]) < fabs(arr[*idx2])) {
-            *idx2 = i;
-        }
-    }
-}
-
 int find_index_of_max_positive(float* arr, int size) {
     float max_positive = -5000.0;
     int idx = -1;
@@ -49,7 +28,6 @@ int find_index_of_max_positive(float* arr, int size) {
             idx = i;
         }
     }
-    // Return -1 if no positive number is found
     return idx;
 }
 
@@ -69,19 +47,20 @@ void least_squares_fit(float* pwms, float* speeds, int n, float* m, float* b) {
     *b = (sum_y - *m * sum_x) / n;
 }
 
-void print_mbot_params_dd(const mbot_params_t* params) {
-    printf("Motor Polarity: %d %d\n", params->motor_polarity[MOT_L], params->motor_polarity[MOT_R]);
-    printf("Encoder Polarity: %d %d\n", params->encoder_polarity[MOT_L], params->encoder_polarity[MOT_R]);
+void print_mbot_params_omni(const mbot_params_t* params) {
+    printf("Motor Polarity: %d %d %d\n", params->motor_polarity[MOT_L], params->motor_polarity[MOT_R], params->motor_polarity[MOT_B]);
+    printf("Encoder Polarity: %d %d %d\n", params->encoder_polarity[MOT_L], params->encoder_polarity[MOT_R], params->encoder_polarity[MOT_B]);
 
-    printf("Positive Slope: %f %f\n", params->slope_pos[MOT_L], params->slope_pos[MOT_R]);
-    printf("Positive Intercept: %f %f\n", params->itrcpt_pos[MOT_L], params->itrcpt_pos[MOT_R]);
+    printf("Positive Slope: %f %f %f\n", params->slope_pos[MOT_L], params->slope_pos[MOT_R], params->slope_pos[MOT_B]);
+    printf("Positive Intercept: %f %f %f\n", params->itrcpt_pos[MOT_L], params->itrcpt_pos[MOT_R], params->itrcpt_pos[MOT_B]);
 
-    printf("Negative Slope: %f %f\n", params->slope_neg[MOT_L], params->slope_neg[MOT_R]);
-    printf("Negative Intercept: %f %f\n", params->itrcpt_neg[MOT_L], params->itrcpt_neg[MOT_R]);
+    printf("Negative Slope: %f %f %f\n", params->slope_neg[MOT_L], params->slope_neg[MOT_R], params->slope_neg[MOT_B]);
+    printf("Negative Intercept: %f %f %f\n", params->itrcpt_neg[MOT_L], params->itrcpt_neg[MOT_R], params->itrcpt_neg[MOT_B]);
 
     printf("\nPID Gains (kp, ki, kd, tf):\n");
     printf("  Wheel L : %f %f %f %f\n", params->left_wheel_vel_pid[0], params->left_wheel_vel_pid[1], params->left_wheel_vel_pid[2], params->left_wheel_vel_pid[3]);
     printf("  Wheel R : %f %f %f %f\n", params->right_wheel_vel_pid[0], params->right_wheel_vel_pid[1], params->right_wheel_vel_pid[2], params->right_wheel_vel_pid[3]);
+    printf("  Wheel B : %f %f %f %f\n", params->back_wheel_vel_pid[0], params->back_wheel_vel_pid[1], params->back_wheel_vel_pid[2], params->back_wheel_vel_pid[3]);
 
     const char* mode_str = "UNKNOWN";
     if(params->control_mode == 0) mode_str = "Feedforward Only";
@@ -94,7 +73,7 @@ void print_mbot_params_dd(const mbot_params_t* params) {
 static void core1_usb_task(void) {
     while (true) {
         dual_cdc_task();
-        sleep_us(100); // slight yield to other IRQs
+        sleep_us(100);
     }
 }
 
@@ -102,51 +81,69 @@ int main() {
     // Initialization
     mbot_params_t params;
     stdio_init_all();
-    // Initialize Dual CDC and launch servicing task on core 1
     dual_cdc_init();
     multicore_launch_core1(core1_usb_task);
     printf("\n\n\nInitializing...\n");
-    bi_decl(bi_program_description("This will calibrate an MBot and print a diagnostic report"));
+    bi_decl(bi_program_description("Calibration for MBot Omni (3-wheel omnidirectional)"));
     mbot_motor_init(MOT_L);
     mbot_motor_init(MOT_R);
+    mbot_motor_init(MOT_B);
     mbot_encoder_init();
     mbot_init_fram();
     printf("\nWaiting for 5 seconds...\n");
     sleep_ms(5000);
 
+    // ====================================================
     // Find Encoder Polarity
+    // ====================================================
     printf("\nTesting Encoder Polarity...\n");
     mbot_motor_set_duty(MOT_L, 0.2);
     mbot_motor_set_duty(MOT_R, 0.2);
+    mbot_motor_set_duty(MOT_B, 0.2);
     for(int i=0; i<5; i++){
-        printf("E0: %d , E1: %d\n", mbot_encoder_read_delta(MOT_L), mbot_encoder_read_delta(MOT_R));
+        printf("E0: %d , E1: %d , E2: %d\n",
+            mbot_encoder_read_delta(MOT_L),
+            mbot_encoder_read_delta(MOT_R),
+            mbot_encoder_read_delta(MOT_B));
         sleep_ms(100);
     }
     mbot_motor_set_duty(MOT_L, 0.0);
     mbot_motor_set_duty(MOT_R, 0.0);
+    mbot_motor_set_duty(MOT_B, 0.0);
     params.encoder_polarity[MOT_L] = (mbot_encoder_read_count(MOT_L)>0) ? 1 : -1;
     params.encoder_polarity[MOT_R] = (mbot_encoder_read_count(MOT_R)>0) ? 1 : -1;
-    printf("\nENC0 POL: %d , ENC1 POL: %d\n \n", params.encoder_polarity[MOT_L], params.encoder_polarity[MOT_R]);
-    
-    // Find Motor Polarity
+    params.encoder_polarity[MOT_B] = (mbot_encoder_read_count(MOT_B)>0) ? 1 : -1;
+    printf("\nENC0 POL: %d , ENC1 POL: %d , ENC2 POL: %d\n \n",
+        params.encoder_polarity[MOT_L],
+        params.encoder_polarity[MOT_R],
+        params.encoder_polarity[MOT_B]);
+
+    // ====================================================
+    // Find Motor Polarity using IMU gyroscope
+    // ====================================================
     mbot_imu_config = mbot_imu_default_config();
     mbot_imu_init(&mbot_imu_data, mbot_imu_config);
     printf("\nTesting Motor Polarity...\n");
 
-    // initializing array to store imu data
-    float gyro_z[4] = {0, 0, 0, 0};
-
-    float spd = 0.4; //Motor duty used for calibration
-    float motor_duties[4][2] = {
-        {spd, spd},
-        {-spd, spd},
-        {spd, -spd},
-        {-spd, -spd}
+    // For omni bot, spinning all 3 motors in the same direction causes rotation.
+    // We test 8 sign combinations for 3 motors and find which gives max positive wz.
+    float gyro_z[8] = {0};
+    float spd = 0.4;
+    float motor_duties[8][3] = {
+        { spd,  spd,  spd},
+        {-spd,  spd,  spd},
+        { spd, -spd,  spd},
+        { spd,  spd, -spd},
+        {-spd, -spd,  spd},
+        {-spd,  spd, -spd},
+        { spd, -spd, -spd},
+        {-spd, -spd, -spd}
     };
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 8; i++) {
         mbot_motor_set_duty(MOT_L, motor_duties[i][0]);
         mbot_motor_set_duty(MOT_R, motor_duties[i][1]);
+        mbot_motor_set_duty(MOT_B, motor_duties[i][2]);
 
         for (int j = 0; j < 25; j++) {
             gyro_z[i] += mbot_imu_data.gyro[2];
@@ -155,197 +152,103 @@ int main() {
 
         mbot_motor_set_duty(MOT_L, 0.0);
         mbot_motor_set_duty(MOT_R, 0.0);
-        printf("Gyro: %f\n", gyro_z[i]);
+        mbot_motor_set_duty(MOT_B, 0.0);
+        printf("Combo %d - Gyro: %f\n", i, gyro_z[i]);
         sleep_ms(500);
     }
 
-    int rot_idx;
-    rot_idx = find_index_of_max_positive(gyro_z, 4); //Find largest positive rotation (+wz)
-    printf("rotidx = %d\n", rot_idx);
-    
-    // motor_duties[rot_idx] will make the robot turnning CCW
-    switch(rot_idx) {
-    case 0:
-        params.motor_polarity[MOT_L] = -1;
-        params.motor_polarity[MOT_R] = -1;
-        break;
-    case 1:
-        params.motor_polarity[MOT_L] = 1;
-        params.motor_polarity[MOT_R] = -1;
-        break;
-    case 2:
-        params.motor_polarity[MOT_L] = -1;
-        params.motor_polarity[MOT_R] = 1;
-        break;
-    case 3:
-        params.motor_polarity[MOT_L] = 1;
-        params.motor_polarity[MOT_R] = 1;
-        break;
-    default:
-        printf("ERROR: Invalid index\n");
-    }
-    
-    // Adjust Encoder Polarity
+    int rot_idx = find_index_of_max_positive(gyro_z, 8);
+    printf("Best rotation index = %d\n", rot_idx);
+
+    // The combination that gives max positive wz (CCW rotation) tells us
+    // that those motor signs cause CCW. For omni kinematics, all motors
+    // spinning in the negative direction causes CCW, so the polarity
+    // is the negation of the duty signs that caused CCW.
+    params.motor_polarity[MOT_L] = (motor_duties[rot_idx][0] > 0) ? -1 : 1;
+    params.motor_polarity[MOT_R] = (motor_duties[rot_idx][1] > 0) ? -1 : 1;
+    params.motor_polarity[MOT_B] = (motor_duties[rot_idx][2] > 0) ? -1 : 1;
+
+    // Adjust Encoder Polarity by motor polarity
     params.encoder_polarity[MOT_L] *= params.motor_polarity[MOT_L];
     params.encoder_polarity[MOT_R] *= params.motor_polarity[MOT_R];
+    params.encoder_polarity[MOT_B] *= params.motor_polarity[MOT_B];
 
-    printf("Motor Polarity: (%d, %d)  Left ID: %d, Right ID: %d\n", params.motor_polarity[MOT_L], params.motor_polarity[MOT_R], MOT_L, MOT_R);
+    printf("Motor Polarity: (%d, %d, %d)\n",
+        params.motor_polarity[MOT_L],
+        params.motor_polarity[MOT_R],
+        params.motor_polarity[MOT_B]);
 
-    printf("\nTesting polarity calibration result: \n");
-
-    int enc_right;
-    int enc_left;
-
-    printf("Driving Forward...\n");
-    mbot_encoder_read_delta(MOT_R);
-    mbot_encoder_read_delta(MOT_L);
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R]*-0.2);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L]*0.2);
-    sleep_ms(500);
-    mbot_motor_set_duty(MOT_R, 0.0);
-    mbot_motor_set_duty(MOT_L, 0.0);
-    enc_right = params.encoder_polarity[MOT_R] * mbot_encoder_read_delta(MOT_R);
-    enc_left = params.encoder_polarity[MOT_L] * mbot_encoder_read_delta(MOT_L);
-    printf("Encoder Readings: R: %d, L: %d, \n", enc_right, enc_left);
-    sleep_ms(500);
-
-    printf("Driving Backward...\n");
-    mbot_encoder_read_delta(MOT_R);
-    mbot_encoder_read_delta(MOT_L);
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R]*0.2);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L]*-0.2);
-    sleep_ms(500);
-    mbot_motor_set_duty(MOT_R, 0.0);
-    mbot_motor_set_duty(MOT_L, 0.0);
-    enc_right = params.encoder_polarity[MOT_R] * mbot_encoder_read_delta(MOT_R);
-    enc_left = params.encoder_polarity[MOT_L] * mbot_encoder_read_delta(MOT_L);
-    printf("Encoder Readings: R: %d, L: %d, \n", enc_right, enc_left);
-    sleep_ms(500);
-
-    printf("Turning Positive (CCW)...\n");
-    mbot_encoder_read_delta(MOT_R);
-    mbot_encoder_read_delta(MOT_L);
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R]*-0.2);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L]*-0.2);
-    sleep_ms(500);
-    mbot_motor_set_duty(MOT_R, 0.0);
-    mbot_motor_set_duty(MOT_L, 0.0);
-    enc_right = params.encoder_polarity[MOT_R] * mbot_encoder_read_delta(MOT_R);
-    enc_left = params.encoder_polarity[MOT_L] * mbot_encoder_read_delta(MOT_L);
-    printf("Encoder Readings: R: %d, L: %d, \n", enc_right, enc_left);
-    sleep_ms(500);
-
-    printf("Turning Negative (CW)...\n");
-    mbot_encoder_read_delta(MOT_R);
-    mbot_encoder_read_delta(MOT_L);
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R]*0.2);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L]*0.2);
-    sleep_ms(500);
-    mbot_motor_set_duty(MOT_R, 0.0);
-    mbot_motor_set_duty(MOT_L, 0.0);
-    enc_right = params.encoder_polarity[MOT_R] * mbot_encoder_read_delta(MOT_R);
-    enc_left = params.encoder_polarity[MOT_L] * mbot_encoder_read_delta(MOT_L);
-    printf("Encoder Readings: R: %d, L: %d, \n", enc_right, enc_left);
-    sleep_ms(500);
-
-    // Find slope and intercept
+    // ====================================================
+    // Calibrate slope/intercept for each motor
+    // ====================================================
     printf("\nCalculating Slope and Intercept...\n");
-    
-    // Turn CCW
+
     int num_points = 20;
     float dt = 0.5;
-    float wheel_speed_right[num_points+1];
-    float wheel_speed_left[num_points+1];
-    float duty_right[num_points+1];
-    float duty_left[num_points+1];
     float conv = (2 * M_PI)/(GEAR_RATIO * ENCODER_RES);
-    printf("Measuring CCW...\n");
-    mbot_encoder_read_delta(MOT_R);
-    mbot_encoder_read_delta(MOT_L);
-    
-    for(int i = 0; i <= num_points; i++){
-        
-        float d = i * 1.0/(float)num_points;
-        mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R] * -d);
-        mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L] * -d);
-        sleep_ms(dt * 1000);
-        duty_right[i] = -d;
-        duty_left[i] = -d;
-        wheel_speed_right[i] = conv * params.encoder_polarity[MOT_R] * mbot_encoder_read_delta(MOT_R) / dt;
-        wheel_speed_left[i] = conv * params.encoder_polarity[MOT_L] * mbot_encoder_read_delta(MOT_L) / dt;
-        printf("duty: %f, right: %f, left: %f\n", duty_right[i], wheel_speed_right[i], wheel_speed_left[i]);
+
+    // Calibrate each motor individually
+    int motors[3] = {MOT_L, MOT_R, MOT_B};
+    const char* motor_names[3] = {"Left", "Right", "Back"};
+
+    for (int m = 0; m < 3; m++) {
+        int mot = motors[m];
+        float wheel_speed[num_points+1];
+        float duty[num_points+1];
+
+        // Negative direction (CCW)
+        printf("\nMeasuring %s Motor - Negative Direction...\n", motor_names[m]);
+        mbot_encoder_read_delta(mot);
+        for(int i = 0; i <= num_points; i++){
+            float d = i * 1.0/(float)num_points;
+            mbot_motor_set_duty(mot, params.motor_polarity[mot] * -d);
+            sleep_ms(dt * 1000);
+            duty[i] = -d;
+            wheel_speed[i] = conv * params.encoder_polarity[mot] * mbot_encoder_read_delta(mot) / dt;
+            printf("duty: %f, speed: %f\n", duty[i], wheel_speed[i]);
+        }
+
+        // Slow down
+        mbot_motor_set_duty(mot, params.motor_polarity[mot] * -0.8);
+        sleep_ms(300);
+        mbot_motor_set_duty(mot, params.motor_polarity[mot] * -0.5);
+        sleep_ms(300);
+        mbot_motor_set_duty(mot, 0.0);
+
+        int n = num_points + 1;
+        least_squares_fit(duty, wheel_speed, n, &params.slope_neg[mot], &params.itrcpt_neg[mot]);
+
+        // Positive direction (CW)
+        sleep_ms(500);
+        printf("Measuring %s Motor - Positive Direction...\n", motor_names[m]);
+        mbot_encoder_read_delta(mot);
+        for(int i = 0; i <= num_points; i++){
+            float d = i * 1.0/(float)num_points;
+            mbot_motor_set_duty(mot, params.motor_polarity[mot] * d);
+            sleep_ms(dt * 1000);
+            duty[i] = d;
+            wheel_speed[i] = conv * params.encoder_polarity[mot] * mbot_encoder_read_delta(mot) / dt;
+            printf("duty: %f, speed: %f\n", duty[i], wheel_speed[i]);
+        }
+
+        // Slow down
+        mbot_motor_set_duty(mot, params.motor_polarity[mot] * 0.8);
+        sleep_ms(300);
+        mbot_motor_set_duty(mot, params.motor_polarity[mot] * 0.5);
+        sleep_ms(300);
+        mbot_motor_set_duty(mot, 0.0);
+
+        least_squares_fit(duty, wheel_speed, n, &params.slope_pos[mot], &params.itrcpt_pos[mot]);
+
+        printf("%s Motor Calibration:\n", motor_names[m]);
+        printf("  slope_pos: %f, itrcpt_pos: %f\n", params.slope_pos[mot], params.itrcpt_pos[mot]);
+        printf("  slope_neg: %f, itrcpt_neg: %f\n", params.slope_neg[mot], params.itrcpt_neg[mot]);
+        sleep_ms(500);
     }
-    
-    int n = sizeof(duty_right) / sizeof(duty_right[0]);
-    float m_rn, b_rn, m_ln, b_ln;
-    least_squares_fit(duty_right, wheel_speed_right, n, &m_rn, &b_rn);
-    least_squares_fit(duty_left, wheel_speed_left, n, &m_ln, &b_ln);
-    
-    //slow down
 
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R] * -0.8);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L] * -0.8);
-    sleep_ms(300);
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R] * -0.5);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L] * -0.5);
-    sleep_ms(300);
-    mbot_motor_set_duty(MOT_R, 0.0);
-    mbot_motor_set_duty(MOT_L, 0.0);
-    printf("\n\n");
-    
-
-    //Turn CW
-    sleep_ms(500);
-    printf("Measuring CW...\n");
-    mbot_encoder_read_delta(MOT_R);
-    mbot_encoder_read_delta(MOT_L);
-    for(int i = 0; i <= num_points; i++){
-        float d = i * 1.0/(float)num_points;
-        mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R] * d);
-        mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L] * d);
-        sleep_ms(dt * 1000);
-        duty_right[i] = d;
-        duty_left[i] = d;
-        wheel_speed_right[i] = conv * params.encoder_polarity[MOT_R] * mbot_encoder_read_delta(MOT_R) / dt;
-        wheel_speed_left[i] = conv * params.encoder_polarity[MOT_L] * mbot_encoder_read_delta(MOT_L) / dt;
-        printf("duty: %f, right: %f, left: %f\n", duty_right[i], wheel_speed_right[i], wheel_speed_left[i]);
-    }
-
-    //slow down
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R] * 0.8);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L] * 0.8);
-    sleep_ms(300);
-    mbot_motor_set_duty(MOT_R, params.motor_polarity[MOT_R] * 0.5);
-    mbot_motor_set_duty(MOT_L, params.motor_polarity[MOT_L] * 0.5);
-    sleep_ms(300);
-    mbot_motor_set_duty(MOT_R, 0.0);
-    mbot_motor_set_duty(MOT_L, 0.0);
-
-    float m_rp, b_rp, m_lp, b_lp;
-    least_squares_fit(duty_right, wheel_speed_right, n, &m_rp, &b_rp);
-    least_squares_fit(duty_left, wheel_speed_left, n, &m_lp, &b_lp);
-    
-    params.slope_pos[MOT_R] = m_rp;
-    params.slope_pos[MOT_L] = m_lp;
-    params.slope_neg[MOT_R] = m_rn;
-    params.slope_neg[MOT_L] = m_ln;
-    params.itrcpt_pos[MOT_R] = b_rp;
-    params.itrcpt_pos[MOT_L] = b_lp;
-    params.itrcpt_neg[MOT_R] = b_rn;
-    params.itrcpt_neg[MOT_L] = b_ln;
-
-    printf("Right Motor Calibration: \n");
-    printf("m_rp: %f\n", m_rp);
-    printf("b_rp: %f\n", b_rp);
-    printf("m_rn: %f\n", m_rn);
-    printf("b_rn: %f\n", b_rn);
-    printf("Left Motor Calibration: \n");
-    printf("m_lp: %f\n", m_lp);
-    printf("b_lp: %f\n", b_lp);
-    printf("m_ln: %f\n", m_ln);
-    printf("b_ln: %f\n", b_ln);
-
-    // Store default PID gains into params struct
+    // ====================================================
+    // Store default PID gains and write to FRAM
+    // ====================================================
     params.left_wheel_vel_pid[0] = MBOT_DEFAULT_PID_GAINS.left_wheel.kp;
     params.left_wheel_vel_pid[1] = MBOT_DEFAULT_PID_GAINS.left_wheel.ki;
     params.left_wheel_vel_pid[2] = MBOT_DEFAULT_PID_GAINS.left_wheel.kd;
@@ -356,15 +259,20 @@ int main() {
     params.right_wheel_vel_pid[2] = MBOT_DEFAULT_PID_GAINS.right_wheel.kd;
     params.right_wheel_vel_pid[3] = MBOT_DEFAULT_PID_GAINS.right_wheel.tf;
 
+    params.back_wheel_vel_pid[0] = MBOT_DEFAULT_PID_GAINS.back_wheel.kp;
+    params.back_wheel_vel_pid[1] = MBOT_DEFAULT_PID_GAINS.back_wheel.ki;
+    params.back_wheel_vel_pid[2] = MBOT_DEFAULT_PID_GAINS.back_wheel.kd;
+    params.back_wheel_vel_pid[3] = MBOT_DEFAULT_PID_GAINS.back_wheel.tf;
+
     params.control_mode = MBOT_DEFAULT_CONTROL_MODE;
 
     mbot_write_fram(0, sizeof(params), &params);
     mbot_params_t written;
     mbot_read_fram(0, sizeof(written), &written);
     printf("\nParameters stored in FRAM (%d bytes): \n", sizeof(written));
-    print_mbot_params_dd(&written);
+    print_mbot_params_omni(&written);
 
     printf("\nDone!\n");
-    fflush(stdout);  // Make sure all output is sent to the terminal
-    sleep_ms(1000);   
+    fflush(stdout);
+    sleep_ms(1000);
 }

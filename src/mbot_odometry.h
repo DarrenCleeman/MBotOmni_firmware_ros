@@ -9,7 +9,7 @@ extern "C" {
  * @brief Calculate odometry based on velocities
  * 
  * @param vx Forward velocity in m/s
- * @param vy Lateral velocity in m/s (always 0 for diff drive)
+ * @param vy Lateral velocity in m/s
  * @param wz Angular velocity in rad/s
  * @param dt Time step in seconds
  * @param x Current x position (will be updated)
@@ -22,7 +22,7 @@ void mbot_calculate_odometry(float vx, float vy, float wz, float dt, float* x, f
  * @brief Calculate odometry based on velocities and gyro readings
  * 
  * @param vx Forward velocity in m/s
- * @param vy Lateral velocity in m/s (always 0 for diff drive)
+ * @param vy Lateral velocity in m/s
  * @param wz Angular velocity in rad/s
  * @param dt Time step in seconds
  * @param gyro_z Gyro reading

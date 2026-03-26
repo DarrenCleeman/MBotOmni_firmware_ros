@@ -36,9 +36,9 @@ set(COMMON_LIBS
 )
 
 #=============================================================================
-# Main MBot Classic ROS Executable
+# Main MBot Omni ROS Executable
 #=============================================================================
-add_executable(mbot_classic_ros
+add_executable(mbot_omni_ros
     src/mbot_classic_ros.c
     src/mbot_classic_ros.h
     src/mbot_odometry.c
@@ -51,7 +51,7 @@ add_executable(mbot_classic_ros
     src/mbot_controller.h
 )
 
-target_link_libraries(mbot_classic_ros
+target_link_libraries(mbot_omni_ros
     ${COMMON_LIBS}
     pico_multicore
     microros
@@ -61,14 +61,14 @@ target_link_libraries(mbot_classic_ros
 )
 
 # Configure USB and output settings for main executable
-pico_enable_stdio_usb(mbot_classic_ros 1)
-pico_enable_stdio_uart(mbot_classic_ros 0)
-pico_add_extra_outputs(mbot_classic_ros)
+pico_enable_stdio_usb(mbot_omni_ros 1)
+pico_enable_stdio_uart(mbot_omni_ros 0)
+pico_add_extra_outputs(mbot_omni_ros)
 
 # [DO NOT CHANGE]
 # Disable CRLF handling for better performance with micro-ROS
 # This means when printing to the console you need to use \r\n instead of \n
-target_compile_definitions(mbot_classic_ros PRIVATE 
+target_compile_definitions(mbot_omni_ros PRIVATE
     # PICO_UART_ENABLE_CRLF_SUPPORT=0
     # PICO_STDIO_ENABLE_CRLF_SUPPORT=0
     # PICO_STDIO_DEFAULT_CRLF=0
@@ -79,43 +79,43 @@ target_compile_definitions(mbot_classic_ros PRIVATE
 # Test Programs
 #=============================================================================
 
-# MBot Calibration
-add_executable(mbot_calibrate_classic
+# MBot Omni Calibration
+add_executable(mbot_calibrate_omni
     tests/mbot_calibrate_classic.c
 )
-target_include_directories(mbot_calibrate_classic PRIVATE
+target_include_directories(mbot_calibrate_omni PRIVATE
     include
     comms/include
 )
-target_link_libraries(mbot_calibrate_classic
+target_link_libraries(mbot_calibrate_omni
     ${COMMON_LIBS}
     pico_multicore
     mbotlib
     rclib
     comms
 )
-pico_enable_stdio_usb(mbot_calibrate_classic 1)
-pico_enable_stdio_uart(mbot_calibrate_classic 0)
-pico_add_extra_outputs(mbot_calibrate_classic)
+pico_enable_stdio_usb(mbot_calibrate_omni 1)
+pico_enable_stdio_uart(mbot_calibrate_omni 0)
+pico_add_extra_outputs(mbot_calibrate_omni)
 
 # Motor Test
-add_executable(mbot_classic_motor_test
+add_executable(mbot_omni_motor_test
     tests/mbot_classic_motor_test.c
 )
-target_include_directories(mbot_classic_motor_test PRIVATE
+target_include_directories(mbot_omni_motor_test PRIVATE
     include
     comms/include
 )
-target_link_libraries(mbot_classic_motor_test
+target_link_libraries(mbot_omni_motor_test
     ${COMMON_LIBS}
     pico_multicore
     mbotlib
     rclib
     comms
 )
-pico_enable_stdio_usb(mbot_classic_motor_test 1)
-pico_enable_stdio_uart(mbot_classic_motor_test 0)
-pico_add_extra_outputs(mbot_classic_motor_test)
+pico_enable_stdio_usb(mbot_omni_motor_test 1)
+pico_enable_stdio_uart(mbot_omni_motor_test 0)
+pico_add_extra_outputs(mbot_omni_motor_test)
 
 # Encoder Test
 add_executable(mbot_encoder_test

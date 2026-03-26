@@ -1,6 +1,6 @@
 /**
  * @file mbot_classic_ros.h
- * @brief MicroROS integration for MBot Classic
+ * @brief MicroROS integration for MBot Omni
  */
 #ifndef MBOT_CLASSIC_ROS_H
 #define MBOT_CLASSIC_ROS_H
@@ -36,8 +36,8 @@ typedef struct {
     float vy;
     float wz;
     // Wheel state
-    float wheel_vel[NUM_MOT_SLOTS]; 
-    int32_t encoder_ticks[NUM_MOT_SLOTS]; 
+    float wheel_vel[NUM_MOT_SLOTS];
+    int32_t encoder_ticks[NUM_MOT_SLOTS];
     int32_t encoder_delta_ticks[NUM_MOT_SLOTS];
     // Motor control
     float motor_pwm[NUM_MOT_SLOTS];
@@ -58,10 +58,10 @@ typedef struct {
 typedef struct {
     int64_t timestamp_us;   // pico time
     float vx;
-    float vy; // 0 when using diff drive
+    float vy;
     float wz;
-    float wheel_vel[NUM_MOT_SLOTS]; // 0=left, 1=right, 2=rear
-    float motor_pwm[NUM_MOT_SLOTS]; // 0=left, 1=right, 2=rear
+    float wheel_vel[NUM_MOT_SLOTS]; // 0=left, 1=right, 2=back
+    float motor_pwm[NUM_MOT_SLOTS]; // 0=left, 1=right, 2=back
     int drive_mode;  // 0=PWM, 1=wheel vel, 2=body vel
 } mbot_cmd_t;
 
@@ -69,25 +69,8 @@ typedef struct {
 extern mbot_state_t mbot_state;
 extern mbot_cmd_t mbot_cmd;
 
-/**
- * @brief Initialize microROS communication
- * 
- * @return int MBOT_OK on success, MBOT_ERROR otherwise
- */
 int mbot_init_micro_ros(void);
-
-/**
- * @brief Handle incoming ROS messages
- * 
- * @return int MBOT_OK on success, MBOT_ERROR otherwise
- */
 int mbot_spin_micro_ros(void);
-
-/**
- * @brief Set up ROS publishers and subscribers
- * 
- * @return int MBOT_OK on success, MBOT_ERROR otherwise
- */
 int mbot_init_micro_ros_comm(void);
 
-#endif /* MBOT_CLASSIC_ROS_H */ 
+#endif /* MBOT_CLASSIC_ROS_H */

@@ -2,7 +2,6 @@
 #include "mbot_classic_ros.h" // For mbot_state_t, mbot_cmd_t, and config defines
 #include <string.h>            // For strlen, snprintf in message init
 #include "pico/time.h"
-#include <mbot/motor/motor.h>  // For mbot_motor_set_duty
 
 // Define ROS Objects (matching extern declarations in .h)
 rcl_publisher_t imu_publisher;
@@ -31,10 +30,6 @@ rcl_service_t reset_odometry_service;
 std_srvs__srv__Trigger_Request reset_odom_req;
 std_srvs__srv__Trigger_Response reset_odom_res;
 
-rcl_service_t lidar_power_service;
-std_srvs__srv__SetBool_Request lidar_power_req;
-std_srvs__srv__SetBool_Response lidar_power_res;
-
 #define FRAME_ID_CAPACITY 16
 
 static char imu_frame_id_buf[FRAME_ID_CAPACITY];
@@ -54,11 +49,6 @@ int mbot_ros_comms_init_messages(rcl_allocator_t* allocator) {
     reset_odom_res.message.data = (char*)allocator->allocate(128, allocator->state);
     reset_odom_res.message.capacity = 128;
     reset_odom_res.message.size = 0;
-
-    std_srvs__srv__SetBool_Response__init(&lidar_power_res);
-    lidar_power_res.message.data = (char*)allocator->allocate(128, allocator->state);
-    lidar_power_res.message.capacity = 128;
-    lidar_power_res.message.size = 0;
 
     // IMU message initialization
     imu_msg.header.frame_id.data = imu_frame_id_buf;
@@ -80,8 +70,8 @@ int mbot_ros_comms_init_messages(rcl_allocator_t* allocator) {
     // Zero all message structs for safe initialization
     memset(&cmd_vel_msg_buffer, 0, sizeof(cmd_vel_msg_buffer));
     memset(&motor_vel_msg, 0, sizeof(motor_vel_msg));
-    memset(&motor_vel_cmd_msg_buffer, 0, sizeof(motor_vel_cmd_msg_buffer)); // subscriber buffer
-    memset(&motor_pwm_cmd_msg_buffer, 0, sizeof(motor_pwm_cmd_msg_buffer)); // subscriber buffer
+    memset(&motor_vel_cmd_msg_buffer, 0, sizeof(motor_vel_cmd_msg_buffer));
+    memset(&motor_pwm_cmd_msg_buffer, 0, sizeof(motor_pwm_cmd_msg_buffer));
     memset(&encoders_msg, 0, sizeof(encoders_msg));
     memset(&battery_msg, 0, sizeof(battery_msg));
     return MBOT_OK;
@@ -130,7 +120,7 @@ int mbot_ros_comms_init_publishers(rcl_node_t *node) {
         ROSIDL_GET_MSG_TYPE_SUPPORT(mbot_interfaces, msg, BatteryADC),
         "battery_adc");
     if (ret != RCL_RET_OK) { printf("[FATAL] Failed to init battery_publisher: %d\n", ret); fflush(stdout); return MBOT_ERROR; }
-    
+
     return MBOT_OK;
 }
 
@@ -156,7 +146,7 @@ int mbot_ros_comms_init_subscribers(rcl_node_t *node) {
         ROSIDL_GET_MSG_TYPE_SUPPORT(mbot_interfaces, msg, MotorPWM),
         "motor_pwm_cmd");
     if (ret != RCL_RET_OK) { printf("[FATAL] Failed to init motor_pwm_cmd_subscriber: %d\n", ret); fflush(stdout); return MBOT_ERROR; }
-    
+
     return MBOT_OK;
 }
 
@@ -175,23 +165,11 @@ int mbot_ros_comms_init_services(rcl_node_t *node) {
         return MBOT_ERROR;
     }
 
-    // Initialize LiDAR power service
-    ret = rclc_service_init_default(
-        &lidar_power_service,
-        node,
-        ROSIDL_GET_SRV_TYPE_SUPPORT(std_srvs, srv, SetBool),
-        "lidar_power");
-    if (ret != RCL_RET_OK) {
-        printf("[FATAL] Failed to init lidar_power_service: %d\n", ret);
-        fflush(stdout);
-        return MBOT_ERROR;
-    }
-
     return MBOT_OK;
 }
 
 void reset_odometry_callback(const void * req, void * res) {
-    (void)req; // Request is empty for Trigger service
+    (void)req;
     std_srvs__srv__Trigger_Response * response = (std_srvs__srv__Trigger_Response *)res;
 
     // Reset odometry in a thread-safe manner
@@ -201,7 +179,6 @@ void reset_odometry_callback(const void * req, void * res) {
     mbot_state.odom_theta = 0.0f;
     EXIT_CRITICAL();
 
-    // Set response
     response->success = true;
     snprintf(response->message.data, response->message.capacity, "Odometry reset to (0, 0, 0)");
     response->message.size = strlen(response->message.data);
@@ -209,28 +186,11 @@ void reset_odometry_callback(const void * req, void * res) {
     printf("[INFO] Odometry reset to origin\n");
 }
 
-void lidar_power_callback(const void * req, void * res) {
-    const std_srvs__srv__SetBool_Request * request = (const std_srvs__srv__SetBool_Request *)req;
-    std_srvs__srv__SetBool_Response * response = (std_srvs__srv__SetBool_Response *)res;
-
-    // Set LiDAR duty cycle: ON (true) = 1.0 (100%), OFF (false) = 0.0 (0%)
-    float duty = request->data ? 1.0f : 0.0f;
-    mbot_motor_set_duty(MOT_LIDAR, duty);
-
-    // Set response
-    response->success = true;
-    snprintf(response->message.data, response->message.capacity,
-             "LiDAR power %s (duty: %.0f%%)", request->data ? "ON" : "OFF", duty * 100.0f);
-    response->message.size = strlen(response->message.data);
-
-    printf("[INFO] LiDAR power %s\n", request->data ? "ON" : "OFF");
-}
-
 void cmd_vel_callback(const void * msgin) {
     const geometry_msgs__msg__Twist * twist_msg = (const geometry_msgs__msg__Twist *)msgin;
     mbot_cmd.timestamp_us = time_us_64();
     mbot_cmd.vx = twist_msg->linear.x;
-    mbot_cmd.vy = twist_msg->linear.y; 
+    mbot_cmd.vy = twist_msg->linear.y;
     mbot_cmd.wz = twist_msg->angular.z;
     mbot_cmd.drive_mode = MODE_MBOT_VEL;
 }
@@ -240,6 +200,7 @@ void motor_vel_cmd_callback(const void * msgin) {
     mbot_cmd.timestamp_us = time_us_64();
     mbot_cmd.wheel_vel[MOT_L] = vel_msg->velocity[MOT_L];
     mbot_cmd.wheel_vel[MOT_R] = vel_msg->velocity[MOT_R];
+    mbot_cmd.wheel_vel[MOT_B] = vel_msg->velocity[MOT_B];
     mbot_cmd.drive_mode = MODE_MOTOR_VEL;
 }
 
@@ -248,6 +209,7 @@ void motor_pwm_cmd_callback(const void * msgin) {
     mbot_cmd.timestamp_us = time_us_64();
     mbot_cmd.motor_pwm[MOT_L] = pwm_msg->pwm[MOT_L];
     mbot_cmd.motor_pwm[MOT_R] = pwm_msg->pwm[MOT_R];
+    mbot_cmd.motor_pwm[MOT_B] = pwm_msg->pwm[MOT_B];
     mbot_cmd.drive_mode = MODE_MOTOR_PWM;
 }
 
@@ -275,12 +237,5 @@ int mbot_ros_comms_add_to_executor(rclc_executor_t *executor) {
         return MBOT_ERROR;
     }
 
-    ret = rclc_executor_add_service(executor, &lidar_power_service, &lidar_power_req,
-                                   &lidar_power_res, &lidar_power_callback);
-    if (ret != RCL_RET_OK) {
-        printf("[ERROR] Failed to add lidar_power_service to executor: %d\n", ret);
-        return MBOT_ERROR;
-    }
-
     return MBOT_OK;
-} 
+}

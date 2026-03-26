@@ -1,18 +1,20 @@
-#ifndef CONFIG_MBOT_CLASSIC_CONFIG_H
-#define CONFIG_MBOT_CLASSIC_CONFIG_H
+#ifndef CONFIG_MBOT_OMNI_CONFIG_H
+#define CONFIG_MBOT_OMNI_CONFIG_H
 
 // Hardware Parameters
 #define GEAR_RATIO              78.0
-#define ENCODER_RES             48.0  // Default encoder resolution.
+#define ENCODER_RES             20.0  // Omni encoder resolution.
 
-// MBot Classic Parameters
-#define DIFF_WHEEL_DIAMETER          0.0837
-#define DIFF_WHEEL_RADIUS            0.04183
-#define DIFF_BASE_RADIUS             0.085
-#define MOT_R                        1   // Right motor slot
-#define MOT_L                        0   // Left motor slot
-#define MOT_UNUSED                   2   // Unused motor slot
-#define MOT_LIDAR                    3   // M3 SERVO motor slot for Lidar
+// MBot Omni Parameters
+#define OMNI_WHEEL_RADIUS            0.048f    // Wheel radius in meters (96mm diameter)
+#define OMNI_BASE_RADIUS             0.10843f  // Distance from center to wheel in meters
+#define MOT_R                        0   // Right motor slot
+#define MOT_B                        1   // Back motor slot
+#define MOT_L                        2   // Left motor slot
 #define NUM_MOT_SLOTS                3   // Total number of wheel motor slots
 
-#endif  /* CONFIG_MBOT_CLASSIC_CONFIG_H */
+// Math constants for omni kinematics
+#define SQRT3                        1.7320508075688772f
+#define INV_SQRT3                    0.5773502691896258f
+
+#endif  /* CONFIG_MBOT_OMNI_CONFIG_H */

@@ -22,13 +22,12 @@ static void core1_usb_task(void) {
 }
 
 int mbot_init_pico(void){
-    // set master clock to 250MHz (if unstable set SYS_CLOCK to 125Mhz)
      if(!set_sys_clock_khz(SYS_CLOCK, true)){
          printf("ERROR mbot_init_pico: cannot set system clock\n");
          return MBOT_ERROR;
      };
 
-    stdio_init_all(); // enable USB serial terminal
+    stdio_init_all();
     dual_cdc_init();
     multicore_launch_core1(core1_usb_task);
     sleep_ms(500);
@@ -41,27 +40,33 @@ int main() {
     mbot_init_pico();
     sleep_ms(2000);
     printf("\033[2J\r");
-    printf("***MBot Classic Motor Test***\n");
+    printf("***MBot Omni Motor Test***\n");
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
     int freq = 5000;
 
-    mbot_motor_init_freq(MOT_R, freq);
     mbot_motor_init_freq(MOT_L, freq);
-
-    blink();
-    printf("Testing right motor...\n");
-    drive_motor_up_down(MOT_R);
+    mbot_motor_init_freq(MOT_R, freq);
+    mbot_motor_init_freq(MOT_B, freq);
 
     blink();
     printf("Testing left motor...\n");
     drive_motor_up_down(MOT_L);
 
     blink();
+    printf("Testing right motor...\n");
+    drive_motor_up_down(MOT_R);
+
+    blink();
+    printf("Testing back motor...\n");
+    drive_motor_up_down(MOT_B);
+
+    blink();
     printf("Done!\n");
 
-    mbot_motor_cleanup(MOT_R);
     mbot_motor_cleanup(MOT_L);
+    mbot_motor_cleanup(MOT_R);
+    mbot_motor_cleanup(MOT_B);
 
     blink();
     return 0;

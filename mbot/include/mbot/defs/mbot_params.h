@@ -37,6 +37,7 @@ typedef struct mbot_params_t{
     float body_vel_wz_pid[4];
     float left_wheel_vel_pid[4];
     float right_wheel_vel_pid[4];
+    float back_wheel_vel_pid[4];
     int control_mode;
 } mbot_params_t;
 
