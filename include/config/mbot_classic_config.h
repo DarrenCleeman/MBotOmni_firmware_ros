@@ -6,7 +6,7 @@
 #define ENCODER_RES             20.0  // Omni encoder resolution.
 
 // MBot Omni Parameters
-#define OMNI_WHEEL_RADIUS            0.096f    // Wheel radius in meters (96mm radius)
+#define OMNI_WHEEL_RADIUS            0.048f    // Wheel radius in meters (48mm radius, 96mm diameter)
 #define OMNI_BASE_RADIUS             0.14232f  // Distance from center to wheel in meters (5.603 in)
 #define MOT_R                        0   // Right motor slot
 #define MOT_B                        1   // Back motor slot
