@@ -1,0 +1,542 @@
+================================================================================
+  MBot Firmware Port: Classic (Differential Drive) -> Omni (3-Wheel Holonomic)
+================================================================================
+
+Commit: 0294be9fa9716610275b6747958fa2ee23bfdf57
+Author: ubaidpira
+Date:   Thu Mar 26 21:38:39 2026
+Stats:  14 files changed, 419 insertions(+), 490 deletions(-) (net -71 lines)
+
+This document details every change made to convert the MBot Classic firmware
+(2-wheel differential drive) into the MBot Omni firmware (3-wheel
+omnidirectional drive at 120-degree spacing) for ROS2 Jazzy.
+
+
+================================================================================
+1. HARDWARE CONFIGURATION
+   File: include/config/mbot_classic_config.h
+================================================================================
+
+1.1 Motor Slot Definitions
+    OLD:
+      #define MOT_R         1   // Right motor slot
+      #define MOT_L         0   // Left motor slot
+      #define MOT_UNUSED    2   // Unused motor slot
+      #define MOT_LIDAR     3   // M3 SERVO motor slot for Lidar
+
+    NEW:
+      #define MOT_R         0   // Right motor slot
+      #define MOT_B         1   // Back motor slot
+      #define MOT_L         2   // Left motor slot
+      #define NUM_MOT_SLOTS 3   // Total number of wheel motor slots
+
+    Changes:
+    - Reordered motor slot numbering to match omni hardware (R=0, B=1, L=2)
+    - Replaced MOT_UNUSED with MOT_B (back motor)
+    - Removed MOT_LIDAR (lidar PWM control not used in omni build)
+    - Added NUM_MOT_SLOTS constant for array sizing
+
+1.2 Wheel and Base Physical Parameters
+    OLD:
+      #define ENCODER_RES          48.0
+      #define DIFF_WHEEL_DIAMETER  0.0837
+      #define DIFF_WHEEL_RADIUS    0.04183
+      #define DIFF_BASE_RADIUS     0.085
+
+    NEW:
+      #define ENCODER_RES          20.0
+      #define OMNI_WHEEL_RADIUS    0.048f      // 96mm diameter wheels
+      #define OMNI_BASE_RADIUS     0.10843f    // center-to-wheel distance
+
+    Changes:
+    - Encoder resolution: 48 -> 20 (different encoder hardware)
+    - Wheel radius: 0.04183m -> 0.048m
+    - Base radius: 0.085m -> 0.10843m
+    - Removed DIFF_WHEEL_DIAMETER (redundant with radius)
+    - All DIFF_ prefixes changed to OMNI_
+
+1.3 New Math Constants for Omni Kinematics
+    ADDED:
+      #define SQRT3        1.7320508075688772f
+      #define INV_SQRT3    0.5773502691896258f
+
+    These are used in the forward/inverse kinematic equations for 120-degree
+    wheel geometry.
+
+1.4 Header Guard Update
+    OLD: CONFIG_MBOT_CLASSIC_CONFIG_H
+    NEW: CONFIG_MBOT_OMNI_CONFIG_H
+
+
+================================================================================
+2. DEFAULT PID GAINS
+   File: include/config/mbot_classic_default_pid.h
+================================================================================
+
+2.1 Added Back Wheel PID Gains
+    OLD:
+      static const mbot_pid_config_t MBOT_DEFAULT_PID_GAINS = {
+          .left_wheel  = { .kp = 0.1f, .ki = 0.0f, .kd = 0.01f, .tf = 0.1f },
+          .right_wheel = { .kp = 0.1f, .ki = 0.0f, .kd = 0.01f, .tf = 0.1f },
+      };
+
+    NEW:
+      static const mbot_pid_config_t MBOT_DEFAULT_PID_GAINS = {
+          .left_wheel  = { .kp = 0.1f, .ki = 0.0f, .kd = 0.01f, .tf = 0.1f },
+          .right_wheel = { .kp = 0.1f, .ki = 0.0f, .kd = 0.01f, .tf = 0.1f },
+          .back_wheel  = { .kp = 0.1f, .ki = 0.0f, .kd = 0.01f, .tf = 0.1f },
+      };
+
+2.2 Header Guard Update
+    OLD: CONFIG_MBOT_CLASSIC_DEFAULT_PID_H
+    NEW: CONFIG_MBOT_OMNI_DEFAULT_PID_H
+
+
+================================================================================
+3. PERSISTENT PARAMETER STRUCTURE (FRAM)
+   File: mbot/include/mbot/defs/mbot_params.h
+================================================================================
+
+3.1 mbot_params_t Structure
+    All motor-related arrays expanded from size 2 to size 3:
+      int motor_polarity[3];
+      int encoder_polarity[3];
+      float slope_pos[3];
+      float itrcpt_pos[3];
+      float slope_neg[3];
+      float itrcpt_neg[3];
+
+    ADDED field:
+      float back_wheel_vel_pid[4];   // [kp, ki, kd, tf]
+
+    This stores back wheel PID gains persistently in FRAM alongside the
+    existing left_wheel_vel_pid and right_wheel_vel_pid arrays.
+
+
+================================================================================
+4. CORE FIRMWARE (Main Application Logic)
+   File: src/mbot_classic_ros.c
+================================================================================
+
+4.1 Forward Kinematics - Body Velocity Calculation
+    OLD (differential):
+      static void mbot_calculate_diff_body_vel(
+          float wheel_left_vel, float wheel_right_vel,
+          float* vx, float* vy, float* wz)
+      {
+          *vx = DIFF_WHEEL_RADIUS * (wheel_left_vel - wheel_right_vel) / 2.0f;
+          *vy = 0.0;
+          *wz = DIFF_WHEEL_RADIUS * (-wheel_left_vel - wheel_right_vel)
+                / (2.0f * DIFF_BASE_RADIUS);
+      }
+
+    NEW (omnidirectional):
+      static void mbot_calculate_omni_body_vel(
+          float wheel_left_vel, float wheel_right_vel, float wheel_back_vel,
+          float* vx, float* vy, float* wz)
+      {
+          *vx = OMNI_WHEEL_RADIUS * (wheel_left_vel * INV_SQRT3
+                                   - wheel_right_vel * INV_SQRT3);
+          *vy = OMNI_WHEEL_RADIUS * (-wheel_left_vel / 3.0f
+                                   - wheel_right_vel / 3.0f
+                                   + wheel_back_vel * (2.0f / 3.0f));
+          *wz = OMNI_WHEEL_RADIUS * -(wheel_left_vel + wheel_right_vel
+                                    + wheel_back_vel)
+                / (3.0f * OMNI_BASE_RADIUS);
+      }
+
+    Key differences:
+    - Takes 3 wheel velocities instead of 2
+    - vy is now computed (was always 0 in differential)
+    - Uses sqrt(3) factors for 120-degree wheel geometry
+    - Angular velocity uses sum of all 3 wheels
+
+4.2 Inverse Kinematics - Motor Target Velocities
+    OLD (MODE_MBOT_VEL case):
+      float target_vel_left  = (local_cmd.vx - DIFF_BASE_RADIUS * local_cmd.wz)
+                               / DIFF_WHEEL_RADIUS;
+      float target_vel_right = (-local_cmd.vx - DIFF_BASE_RADIUS * local_cmd.wz)
+                               / DIFF_WHEEL_RADIUS;
+
+    NEW (MODE_MBOT_VEL case):
+      float target_vel_left  = (SQRT3 / 2.0f * local_cmd.vx
+                              - 0.5f * local_cmd.vy
+                              - OMNI_BASE_RADIUS * local_cmd.wz)
+                              / OMNI_WHEEL_RADIUS;
+      float target_vel_right = (-SQRT3 / 2.0f * local_cmd.vx
+                              - 0.5f * local_cmd.vy
+                              - OMNI_BASE_RADIUS * local_cmd.wz)
+                              / OMNI_WHEEL_RADIUS;
+      float target_vel_back  = (local_cmd.vy
+                              - OMNI_BASE_RADIUS * local_cmd.wz)
+                              / OMNI_WHEEL_RADIUS;
+
+    Key differences:
+    - Computes 3 target velocities instead of 2
+    - Supports vy (lateral) commands
+    - Uses 120-degree geometry with sqrt(3) factors
+
+4.3 Hardware Initialization (mbot_init_hardware)
+    ADDED:
+      mbot_motor_init(MOT_B);
+      mbot_back_pwm_lpf = rc_filter_empty();
+      rc_filter_first_order_lowpass(&mbot_back_pwm_lpf, MAIN_LOOP_PERIOD, 0.20f);
+
+    REMOVED:
+      mbot_motor_init(MOT_LIDAR);
+      mbot_motor_set_duty(MOT_LIDAR, 1.0f);
+
+    Changes:
+    - Back motor initialized (replaces unused MOT_LIDAR)
+    - Third low-pass filter added for back motor PWM smoothing
+    - Lidar motor initialization removed entirely
+
+4.4 Motor Control Loop (mbot_loop) - All Control Modes
+    PWM variable declarations:
+      OLD: float pwm_left = 0.0f, pwm_right = 0.0f;
+      NEW: float pwm_left = 0.0f, pwm_right = 0.0f, pwm_back = 0.0f;
+           float pid_pwm_left = 0.0f, pid_pwm_right = 0.0f, pid_pwm_back = 0.0f;
+
+    MODE_MOTOR_PWM (direct PWM):
+      ADDED: pwm_back = local_cmd.motor_pwm[MOT_B];
+
+    MODE_MOTOR_VEL (wheel velocity control):
+      ADDED: vel_back_comp (compensated velocity for back motor)
+      ADDED: ff_pwm_back (feedforward PWM for back motor)
+      ADDED: back_correction from PID controller
+      All control sub-modes (FF_ONLY, PID_ONLY, FF_PID) updated for 3 motors
+
+    MODE_MBOT_VEL (body velocity control):
+      See inverse kinematics changes above (4.2)
+      Same feedforward + PID pattern extended to back motor
+
+    Motor duty output:
+      ADDED: mbot_motor_set_duty(MOT_B, pwm_back);
+
+    PWM low-pass filtering:
+      ADDED: pwm_back = rc_filter_march(&mbot_back_pwm_lpf, pwm_back);
+
+4.5 Encoder Reading (mbot_loop)
+    ADDED:
+      mbot_state.encoder_ticks[MOT_B] = mbot_encoder_read_count(MOT_B);
+      mbot_state.encoder_delta_ticks[MOT_B] = mbot_encoder_read_delta(MOT_B);
+
+    Back motor encoder is now read every loop iteration alongside left and
+    right encoders.
+
+4.6 Motor Velocity Publishing (mbot_publish_state)
+    OLD:
+      motor_vel_msg.velocity[MOT_UNUSED] = 0.0f;
+
+    NEW:
+      motor_vel_msg.velocity[MOT_B] = local_state.wheel_vel[MOT_B];
+
+    Back motor velocity is now published with actual readings instead of
+    a hardcoded zero.
+
+4.7 Startup and Validation
+    OLD: printf("\r\nMBot Classic Firmware (ROS2)\r\n");
+         validate_mbot_classic_FRAM_data(&params, MOT_L, MOT_R, MOT_UNUSED);
+
+    NEW: printf("\r\nMBot Omni Firmware (ROS2)\r\n");
+         validate_mbot_omni_FRAM_data(&params, MOT_L, MOT_R, MOT_B);
+
+4.8 Parameter Printing (print_mbot_params)
+    All printf statements updated to print 3 values instead of 2:
+      Motor Polarity, Encoder Polarity, Positive Slope, Positive Intercept,
+      Negative Slope, Negative Intercept
+
+    ADDED:
+      printf("  Wheel B : %f %f %f %f\n", params->back_wheel_vel_pid[...]);
+
+4.9 Executor Handle Count
+    OLD: RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES + 7
+    NEW: RCLC_EXECUTOR_PARAMETER_SERVER_HANDLES + 6
+
+    Reduced by 1 because the lidar PWM service was removed.
+
+
+================================================================================
+5. CORE FIRMWARE HEADER
+   File: src/mbot_classic_ros.h
+================================================================================
+
+5.1 State and Command Structures
+    Motor arrays in mbot_state_t and mbot_cmd_t now use NUM_MOT_SLOTS (3)
+    instead of hardcoded size 2:
+      float wheel_vel[NUM_MOT_SLOTS];     // indices: 0=L, 1=R, 2=B
+      float motor_pwm[NUM_MOT_SLOTS];
+
+5.2 Global Filter Declaration
+    ADDED: rc_filter_t mbot_back_pwm_lpf;
+
+
+================================================================================
+6. PID CONTROLLER
+   File: src/mbot_controller.h
+================================================================================
+
+6.1 PID Config Structure
+    ADDED field:
+      pid_params_t back_wheel;
+
+    OLD: mbot_pid_config_t had left_wheel and right_wheel only
+    NEW: mbot_pid_config_t has left_wheel, right_wheel, and back_wheel
+
+6.2 Function Signature
+    OLD:
+      void mbot_motor_vel_controller(
+          float target_left_vel, float target_right_vel,
+          float current_left_vel, float current_right_vel,
+          float* left_correction, float* right_correction);
+
+    NEW:
+      void mbot_motor_vel_controller(
+          float target_left_vel, float target_right_vel, float target_back_vel,
+          float current_left_vel, float current_right_vel, float current_back_vel,
+          float* left_correction, float* right_correction, float* back_correction);
+
+
+================================================================================
+7. PID CONTROLLER IMPLEMENTATION
+   File: src/mbot_controller.c
+================================================================================
+
+7.1 Filter Declarations
+    ADDED: rc_filter_t back_wheel_pid;
+
+7.2 Controller Initialization (mbot_controller_init)
+    ADDED:
+      back_wheel_pid = rc_filter_empty();
+      rc_filter_pid(&back_wheel_pid,
+                    pid_gains.back_wheel.kp, pid_gains.back_wheel.ki,
+                    pid_gains.back_wheel.kd, pid_gains.back_wheel.tf,
+                    MAIN_LOOP_PERIOD);
+      rc_filter_enable_saturation(&back_wheel_pid, -1.0, 1.0);
+
+7.3 Velocity Controller (mbot_motor_vel_controller)
+    ADDED:
+      float back_error = target_back_vel - current_back_vel;
+      *back_correction = rc_filter_march(&back_wheel_pid, back_error);
+
+7.4 PID Gain Reading from FRAM (mbot_read_pid_gains)
+    ADDED:
+      pid_gains.back_wheel.kp  = params->back_wheel_vel_pid[0];
+      pid_gains.back_wheel.ki  = params->back_wheel_vel_pid[1];
+      pid_gains.back_wheel.kd  = params->back_wheel_vel_pid[2];
+      pid_gains.back_wheel.tf  = params->back_wheel_vel_pid[3];
+
+7.5 ROS Parameter Server (init_parameter_server)
+    max_params increased: 9 -> 13 (4 new back wheel parameters)
+
+    ADDED parameter registrations:
+      back_wheel.kp
+      back_wheel.ki
+      back_wheel.kd
+      back_wheel.tf
+
+7.6 Parameter Callback Handler (parameter_callback)
+    ADDED 4 new callback cases:
+      "back_wheel.kp" -> updates back_wheel_pid and saves to FRAM
+      "back_wheel.ki" -> updates back_wheel_pid and saves to FRAM
+      "back_wheel.kd" -> updates back_wheel_pid and saves to FRAM
+      "back_wheel.tf" -> updates back_wheel_pid and saves to FRAM
+
+7.7 FRAM Save (mbot_save_params_to_fram)
+    ADDED:
+      params.back_wheel_vel_pid[0] = pid_gains.back_wheel.kp;
+      params.back_wheel_vel_pid[1] = pid_gains.back_wheel.ki;
+      params.back_wheel_vel_pid[2] = pid_gains.back_wheel.kd;
+      params.back_wheel_vel_pid[3] = pid_gains.back_wheel.tf;
+
+
+================================================================================
+8. ODOMETRY
+   File: src/mbot_odometry.c
+================================================================================
+
+    NO CHANGES REQUIRED.
+
+    The odometry function already supported full holonomic motion:
+      void mbot_calculate_odometry(float vx, float vy, float wz, float dt,
+                                   float* x, float* y, float* theta)
+      {
+          *x     += vx * dt * cos(*theta) - vy * dt * sin(*theta);
+          *y     += vx * dt * sin(*theta) + vy * dt * cos(*theta);
+          *theta += wz * dt;
+      }
+
+    The vy parameter was previously always 0.0 (differential drive had no
+    lateral velocity). With the omni port, vy is now a real computed value
+    from the forward kinematics.
+
+
+================================================================================
+9. CALIBRATION FIRMWARE
+   File: tests/mbot_calibrate_classic.c
+================================================================================
+
+9.1 Motor Polarity Detection
+    OLD (differential, 4 combinations for 2 motors):
+      float gyro_z[4] = {0, 0, 0, 0};
+      float motor_duties[4][2] = {
+          { spd,  spd},    // both forward
+          {-spd,  spd},    // left back, right forward
+          { spd, -spd},    // left forward, right back
+          {-spd, -spd}     // both back
+      };
+      // Test each combo, read gyro, use complex switch to determine polarity
+
+    NEW (omni, 8 combinations for 3 motors = 2^3):
+      float gyro_z[8] = {0};
+      float motor_duties[8][3] = {
+          { spd,  spd,  spd},     // all positive
+          {-spd,  spd,  spd},     // left negative
+          { spd, -spd,  spd},     // right negative
+          { spd,  spd, -spd},     // back negative
+          {-spd, -spd,  spd},     // left+right negative
+          {-spd,  spd, -spd},     // left+back negative
+          { spd, -spd, -spd},     // right+back negative
+          {-spd, -spd, -spd}      // all negative
+      };
+      // Find max positive gyro_z (CCW rotation)
+      // Negate the signs that caused CCW:
+      params.motor_polarity[MOT_L] = (motor_duties[rot_idx][0] > 0) ? -1 : 1;
+      params.motor_polarity[MOT_R] = (motor_duties[rot_idx][1] > 0) ? -1 : 1;
+      params.motor_polarity[MOT_B] = (motor_duties[rot_idx][2] > 0) ? -1 : 1;
+
+    The polarity detection logic was simplified: instead of a switch statement,
+    it uses a direct sign-inversion formula.
+
+9.2 Removed Helper Function
+    DELETED: find_two_smallest()
+    This was only used for 2-motor differential polarity detection.
+
+9.3 Encoder Polarity Testing
+    ADDED: MOT_B encoder delta printing alongside MOT_L and MOT_R.
+      printf("E0: %d , E1: %d , E2: %d\n", ...)
+
+9.4 Motor Slope/Intercept Calibration
+    OLD: Calibrated 2 motors (L and R)
+    NEW: Calibrated 3 motors (L, R, B)
+
+      int motors[3] = {MOT_L, MOT_R, MOT_B};
+      const char* motor_names[3] = {"Left", "Right", "Back"};
+      for (int m = 0; m < 3; m++) { ... }
+
+    Each motor gets separate slope/intercept for positive and negative
+    directions, using the same sweep methodology as before.
+
+9.5 PID Gain Storage
+    ADDED:
+      params.back_wheel_vel_pid[0] = MBOT_DEFAULT_PID_GAINS.back_wheel.kp;
+      params.back_wheel_vel_pid[1] = MBOT_DEFAULT_PID_GAINS.back_wheel.ki;
+      params.back_wheel_vel_pid[2] = MBOT_DEFAULT_PID_GAINS.back_wheel.kd;
+      params.back_wheel_vel_pid[3] = MBOT_DEFAULT_PID_GAINS.back_wheel.tf;
+
+9.6 Parameter Printing
+    All print statements updated to show 3 motor values:
+      Motor Polarity:    %d %d %d
+      Encoder Polarity:  %d %d %d
+      Positive Slope:    %f %f %f
+      ...etc
+    ADDED: printf("  Wheel B : %f %f %f %f\n", ...)
+
+
+================================================================================
+10. MOTOR TEST FIRMWARE
+    File: tests/mbot_classic_motor_test.c
+================================================================================
+
+10.1 Motor Initialization
+    ADDED: mbot_motor_init_freq(MOT_B, freq);
+
+10.2 Motor Testing
+    ADDED:
+      printf("Testing back motor...\n");
+      drive_motor_up_down(MOT_B);
+
+10.3 Cleanup
+    ADDED: mbot_motor_cleanup(MOT_B);
+
+
+================================================================================
+11. BUILD SYSTEM
+    File: CMakeLists.txt
+================================================================================
+
+11.1 Target Renames
+    OLD                          NEW
+    mbot_classic_ros          -> mbot_omni_ros
+    mbot_calibrate_classic    -> mbot_calibrate_omni
+    mbot_classic_motor_test   -> mbot_omni_motor_test
+
+    Source files (.c/.h) were NOT renamed, only the build targets/output
+    binaries.
+
+11.2 Removed Targets
+    The lidar service target was removed (no longer applicable to omni build).
+
+
+================================================================================
+12. DEBUG PRINTING
+    File: src/mbot_print.c
+================================================================================
+
+    All parameter printing functions updated to include back motor values
+    (motor polarity, encoder polarity, slopes, intercepts, PID gains).
+
+
+================================================================================
+13. ROS COMMUNICATIONS
+    File: src/mbot_ros_comms.c
+================================================================================
+
+    Motor velocity message updated:
+      OLD: motor_vel_msg.velocity[MOT_UNUSED] = 0.0f;
+      NEW: motor_vel_msg.velocity[MOT_B] = local_state.wheel_vel[MOT_B];
+
+    Back motor velocity is now published with real sensor data.
+
+
+================================================================================
+14. FILES WITH NO CHANGES NEEDED
+================================================================================
+
+    src/mbot_odometry.c    - Already supported holonomic (vx, vy, wz)
+    src/mbot_odometry.h    - No interface changes needed
+    src/mbot_ros_comms.h   - No interface changes needed
+
+
+================================================================================
+15. REMOVED FEATURES
+================================================================================
+
+    - LiDAR PWM motor control (MOT_LIDAR initialization, duty setting)
+    - Differential drive kinematic function (mbot_calculate_diff_body_vel)
+    - DIFF_* physical parameter constants
+    - find_two_smallest() calibration helper
+    - One executor handle (reduced from 7 to 6)
+
+
+================================================================================
+16. SUMMARY
+================================================================================
+
+    The port touches every layer of the firmware stack:
+
+    Layer               What Changed
+    ------------------  -------------------------------------------------------
+    Hardware config     Motor slots, physical parameters, math constants
+    Kinematics          Forward/inverse equations (diff -> omni 120-degree)
+    Motor control       2 motors -> 3 motors in all control modes
+    PID control         Added back wheel controller + parameter server entries
+    FRAM parameters     Added back_wheel_vel_pid, expanded arrays to size 3
+    Calibration         8-combo polarity detection, 3-motor slope calibration
+    ROS publishing      Back motor velocity published
+    Build system        Targets renamed, lidar target removed
+    Diagnostics         All prints updated for 3 motors
+
+    The core design philosophy (state machine, control modes, FRAM persistence,
+    ROS parameter server, dual CDC USB) was preserved. The changes are purely
+    additive in terms of motor count and kinematic model.
